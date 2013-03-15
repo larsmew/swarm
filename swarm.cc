@@ -49,6 +49,13 @@ long penalty_gapextend;
 long penalty_gapopen;
 long penalty_mismatch;
 
+/* related to MPI */
+#ifdef MPISWARM
+#define MPI_MASTER 0
+int mpirank,mpisize;
+int mpithreads;
+#endif
+
 /* Other variables */
 
 long mmx_present;
@@ -145,6 +152,9 @@ void args_show()
     fprintf(stderr, "Statistics file:   %s\n", statsfilename);
   fprintf(stderr, "Differences:       %ld\n", resolution);
   fprintf(stderr, "Threads:           %ld\n", threads);
+#ifdef MPISWARM
+  fprintf(stderr, "Total number of Threads: %ld\n", mpithreads);
+#endif
   fprintf(stderr, "Match score:       %ld\n", matchscore);
   fprintf(stderr, "Mismatch penalty:  %ld\n", -mismatchscore);
   fprintf(stderr, "Gap penalties:     opening: %ld, extension: %ld\n", gapopen, gapextend);
@@ -240,7 +250,12 @@ void args_init(int argc, char **argv)
 	  
     case 'v':
       /* version */
-      show_header();
+#ifdef MPISWARM
+      if(mpirank==MPI_MASTER) 
+#endif
+      {
+       show_header();
+      }
       exit(1);
       break;
 
@@ -303,27 +318,42 @@ void args_init(int argc, char **argv)
 
   if (outfilename)
     {
+#ifdef MPISWARM
+  if(mpirank==MPI_MASTER) 
+#endif
+    {
       outfile = fopen(outfilename, "w");
       if (! outfile)
 	fatal("Unable to open output file for writing.");
     }
+   }
   else
     outfile = stdout;
   
   if (statsfilename)
     {
+#ifdef MPISWARM
+  if(mpirank==MPI_MASTER) 
+#endif
+     {
       statsfile = fopen(statsfilename, "w");
       if (! statsfile)
 	fatal("Unable to open statistics file for writing.");
+     }
     }
   else
     statsfile = 0;
   
   if (uclustfilename)
     {
+#ifdef MPISWARM
+  if(mpirank==MPI_MASTER) 
+#endif
+     {
       uclustfile = fopen(uclustfilename, "w");
       if (! uclustfile)
 	fatal("Unable to open uclust file for writing.");
+     }
     }
   else
     uclustfile = 0;
@@ -332,12 +362,24 @@ void args_init(int argc, char **argv)
 
 int main(int argc, char** argv)
 {
+#ifdef MPISWARM
+  int rc = MPI_Init(&argc, &argv);
+  if (rc != MPI_SUCCESS)
+    fatal("Unable to initialize MPI.");
+  MPI_Comm_rank(MPI_COMM_WORLD, &mpirank);
+  MPI_Comm_size(MPI_COMM_WORLD, &mpisize);
+  cpu_features_detect();
+#else
   cpu_features_detect();
 
   if (! sse41_present)
     fprintf(stderr, "Warning: This program requires a processor with SSE4.1.\n");
+#endif
 
   args_init(argc, argv);
+#ifdef MPISWARM
+  mpithreads=mpisize*threads;
+#endif
 
   penalty_mismatch = matchscore - mismatchscore;
   penalty_gapopen = gapopen;
@@ -349,13 +391,27 @@ int main(int argc, char** argv)
   penalty_gapopen /= penalty_factor;
   penalty_gapextend /= penalty_factor;
 
-  show_header();
+#ifdef MPISWARM
+  if(mpirank==MPI_MASTER) 
+#endif
+  {
+   show_header();
+  }
   
+#ifdef MPISWARM
+  // TODO: Only one Task per node should read and in case of massive
+  // parallelism this should be reduced further
+#endif
   db_read(databasename);
 
   dbsequencecount = db_getsequencecount();
 
-  args_show();
+#ifdef MPISWARM
+  if(mpirank==MPI_MASTER) 
+#endif
+  {
+   args_show();
+  }
 
   score_matrix_init();
 
